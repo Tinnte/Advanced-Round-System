@@ -1,0 +1,376 @@
+--Services
+local Teams = game:GetService("Teams")
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local repli = game:GetService("ReplicatedStorage")
+
+--Long list of remotes
+local DevourPunch = repli.DevourPunchEvent
+local DiedEvent = repli.DiedEvent
+local HaveVoted = repli.AlreadyVoted
+local VoteEvent = repli.VoteEvent
+local TimeEvent = repli.Timeev
+local IsDevour = repli.IsDevour
+local KillerPlayer = repli.KillerPlayer
+local KillerWin = repli.KillerWin
+local SurvivorsWin = repli.SurvivorsWin
+local RoundStarting = repli.RoundStarting
+local KillEven = repli.KillEvent
+
+local random = Random.new()
+
+--The round table and the index metamethod
+local Round = {}
+Round.__index = Round
+
+--Creating a leaderstats and setting up thing in the player
+game.Players.PlayerAdded:Connect(function(player)
+	player.RespawnLocation = workspace.SpawnLocation
+	local Cara = player.Character or player.CharacterAdded:Wait()
+	Cara.Humanoid.WalkSpeed = 20
+	player:SetAttribute("Chance", 5)
+	player.Team = Teams.LobbyTeam
+	local leaderstats = Instance.new("Folder", player)
+	local Wins = Instance.new("IntValue", leaderstats)
+	local KillerWins = Instance.new("IntValue", leaderstats)
+	KillerWins.Name = "KillerWins"
+	leaderstats.Name = "leaderstats"
+	Wins.Name = "Wins"
+	if player.Team ~= Teams.LobbyTeam then
+		player:Kick("An error appenned")
+	end
+end)
+
+--The new function where I set up all of the things needed to access them easily
+function Round.New()
+	local self = setmetatable({}, Round)
+	--The system normaly works only with 2 players but I set it to 1 so you can try
+	self.MinPlayers = 1
+	self.IntermissionDecompte = 20
+	self.NormalWalk = 20
+	self.DevourWalk = 30
+	self.Maps = game.ServerStorage.Maps
+	self.RoundDecompte = 35
+	self.MaxHealth = 100
+	self.KillerDamage = 10
+	self.SpawnLocation = workspace.SpawnLocation
+	self.VoteParts = workspace.VoteParts
+	
+	self:Intermission()
+	return self
+end
+
+--All of the basics functions that I use later in te script
+
+
+--Choose a random Map from the maps folder (self.Map)
+function Round:ChooseMap()
+	
+	local randomMap = random:NextInteger(1, #self.Maps:GetChildren())
+	for i, Map in pairs(self.Maps:GetChildren()) do
+		
+		if randomMap == i then
+			
+			if Map:GetAttribute("Choosen") then return self:ChooseMap() end
+			Map:SetAttribute("Choosen", true)
+			return Map
+		end
+	end
+end
+
+--Get the map who has the most vots of the tree maps choosen above
+function Round:GetVotedMap()
+	local ModeVots = {}
+	for _, Map in pairs(self.Maps:GetChildren()) do
+		if Map:GetAttribute("Votes") then
+			table.insert(ModeVots, Map)
+		end
+		
+	end
+
+	local VotedMode = math.max(ModeVots[1]:GetAttribute("Votes"), ModeVots[2]:GetAttribute("Votes"), ModeVots[3]:GetAttribute("Votes"))
+		
+	for i, Mode in pairs(ModeVots) do
+		if Mode:GetAttribute("Votes") == VotedMode then
+			return Mode
+		end
+	end	
+end
+
+--Teleport a player to a random part in the partfolder that the map contain
+function TpToParts(PartFolder :Folder)
+	local Partts = PartFolder:GetChildren()
+	local RandomPart = Partts[random:NextInteger(1, #PartFolder:GetChildren())]
+	return RandomPart
+end
+
+--[[By the end of each game, if the player is not the killer his "Purcentage" attribute 
+will increase by five, so this function choose from all of the players in the game and 
+get a random player (If the player purcentage is hight he has more chance to be the 
+killer and vice-versa)]]
+function Purcentage()
+	local numb = 0
+	for _, player in pairs(Players:GetPlayers()) do
+		numb += player:GetAttribute("Chance")
+	end
+	local RandomNumb = random:NextNumber(1, numb)
+	for i, player in pairs(Players:GetPlayers()) do
+		RandomNumb -= player:GetAttribute("Chance")
+		if RandomNumb <= 0 then
+			return player
+		end
+	end
+end
+
+--[[If the devour hit a player, this player will get a cursed attribute, that mean that even if he
+resets himself the killer will get the kill, for each kill the devour becomes more powerfull]]
+function DeadEvent(player)
+	if player:GetAttribute("Cursed") then
+		local Killer = Players:FindFirstChild(player:GetAttribute("Cursed"))
+		local Kills = Killer:GetAttribute("Kills")
+		Evolve(Killer)
+		Killer:SetAttribute("Kills", Kills + 1)
+		local Killss = Killer:GetAttribute("Kills")
+		task.wait(0.1)
+		KillEven:FireClient(Killer, Killss)
+		player:SetAttribute("Cursed", nil)
+	end
+	
+	player.Team = Teams.LobbyTeam
+	local playerChance = player:GetAttribute("Chance")
+	player:SetAttribute("Chance", playerChance + 5)
+	
+end
+
+--This function make the devour more powerfull at each kill 
+--(Increase his speed and damage)
+function Evolve(devour:Player)
+	local Damage = devour:GetAttribute("Damage")
+	devour:SetAttribute("Damage", Damage + 15)
+	devour.Character.Humanoid.WalkSpeed += 10
+end
+
+--Giving the killer "abilities" and attributes
+function Round:KillerStart(killer : Player, killerSpawn)
+	killer:SetAttribute("DevourKiller", true)
+	killer.Character.Humanoid.WalkSpeed = self.DevourWalk
+	killer:SetAttribute("Kills", 0)
+	killer.Character:FindFirstChild("HumanoidRootPart").Position = 
+		killerSpawn.Position
+	killer:SetAttribute("Damage", 15)
+	killer.Team = Teams.KillerTeam
+	self.Glow = Instance.new("Highlight")
+	self.Glow.Parent = killer.Character
+	self.Glow.OutlineColor = Color3.new(1, 0, 0)
+	self.Glow.FillTransparency = 1
+	killer:SetAttribute("Chance", 5)
+	killer:SetAttribute("Killer", true)
+	task.wait(0.5)
+	killerSpawn:Destroy()
+end
+
+-------------------------------------------------------------------------------------
+
+--This big function is globally to choose 3 maps, get the most voted map and start the round
+function Round:Intermission()
+	workspace:SetAttribute("GameStatus", "Lobby")
+	for _, player in pairs(Players:GetPlayers()) do
+		local Cara = player.Character or player.CharacterAdded:Wait()
+		player.Team = Teams.LobbyTeam
+		Cara.Humanoid.Health = self.MaxHealth
+		Cara.Humanoid.WalkSpeed = self.NormalWalk
+	end
+	
+	--Waiting until there is enough player in the game
+	while #Teams.LobbyTeam:GetPlayers() < self.MinPlayers do
+		print("Waiting for players")
+		task.wait(1.5)
+	end
+	task.wait(1)
+	
+	--choose 3 maps (Because there is tree voteparts and we are looping true all of them)
+	for _, VotePart in pairs(self.VoteParts:GetChildren())  do
+		
+		local ChoosenMap = self:ChooseMap()
+		ChoosenMap:SetAttribute("Votes", 0)
+		VotePart.SurfaceGui.TextLabel.Text = ChoosenMap.Name
+		
+	end
+	
+	--Detect if a player vote a map
+	for i, VotePart in pairs(self.VoteParts:GetChildren()) do
+		VotePart.ProximityPrompt.Triggered:Connect(function(player: Player)
+
+			local Votes = self.Maps:FindFirstChild(VotePart.SurfaceGui.TextLabel.Text):GetAttribute("Votes")
+			local MapVoted = self.Maps:FindFirstChild(VotePart.SurfaceGui.TextLabel.Text)
+			MapVoted:SetAttribute("Votes", Votes + 1)
+			
+			if player:GetAttribute("HasVoted") then 
+					print("Player has alrd voted")
+					HaveVoted:FireClient(player) 
+				else 
+					print("Player his voting")
+					VoteEvent:FireClient(player, MapVoted.Name)
+			end
+			player:SetAttribute("HasVoted", true)
+		end)
+	end
+	
+	--Decompte
+	for i = self.IntermissionDecompte, 0, -1 do
+		TimeEvent:FireAllClients(i)
+		task.wait(1)
+	end
+	
+	local VotedMap = self:GetVotedMap()
+	--Recheck if there is enough players and starting the round 
+	if #Teams.LobbyTeam:GetPlayers() < self.MinPlayers then
+		print("Game couldn't start : Not Enough Players")
+		self:Intermission()
+	
+		else
+		for i, map in pairs(self.Maps:GetChildren()) do
+			map:SetAttribute("Votes", nil)
+			map:SetAttribute("Choosen", false)
+		end
+		self:StartRound(VotedMap)
+	end
+end
+
+--Fires whenever a player with the devour attribute (the killer) clicks, and do damage
+DevourPunch.OnServerEvent:Connect(function(Killer)
+	local cara = Killer.Character or Killer.CharacterAdded:Wait() 
+	local Humanoid = cara:WaitForChild("Humanoid")
+	local root :Part = Killer.Character:FindFirstChild("HumanoidRootPart")
+	local Part = Instance.new("Part")
+	local Weld = Instance.new("WeldConstraint", root)
+	Weld.Part0 = root
+	Weld.Part1 = Part
+
+	Part.CanCollide = false
+	Part.Transparency = 0.5
+	Part.CanQuery = false
+	Part.Massless = true
+	Part.Size = Vector3.new(3,3,5)
+	Part.CFrame = root.CFrame + root.CFrame.LookVector
+	Part.Parent = cara
+	Part:SetAttribute("Touchable", true)
+
+	Part.Touched:Connect(function(hit)
+
+		if hit.Parent:FindFirstChild(Killer.Name) then return end
+		local humanoid = hit.Parent:FindFirstChild("Humanoid")
+		local Player = game.Players:GetPlayerFromCharacter(hit.Parent)
+		if humanoid then
+			if Part:GetAttribute("Touchable") then
+				-- Aussi detect si l'humanoid est mort return end
+				if Player then 
+					Player:SetAttribute("Cursed", Killer.Name)
+					print("Player tou")
+				end
+				local damage = Killer:GetAttribute("Damage")
+				humanoid:TakeDamage(damage)
+				Part:SetAttribute("Touchable", nil)
+				Part:Destroy()
+			end
+		end
+	end)
+	Debris:AddItem(Part,.25)
+end)
+
+--Start the round, choosing a killer, teleporting all of the players in the game
+--to a part in the arena
+	function Round:StartRound(VotedMap)
+		self.MapClone = VotedMap:Clone()
+		print(self.MapClone)
+		self.MapClone.Parent = workspace
+		local ChoosenPlayer = Purcentage()
+		RoundStarting:FireAllClients()
+		task.wait(1)
+		KillerPlayer:FireAllClients(ChoosenPlayer)
+		task.wait(1)
+		self.Killer = ChoosenPlayer
+		local killerspawn = self.MapClone.KillerSpawn
+		self:KillerStart(ChoosenPlayer, killerspawn)
+		task.wait(1)
+
+		for _, player in pairs(Players:GetPlayers()) do
+			player:SetAttribute("HasVoted", nil)
+			if player:GetAttribute("Killer") then continue end
+			local RandPart = TpToParts(self.MapClone.Spawns)
+			player.Character:PivotTo(RandPart.CFrame)
+			RandPart:Destroy()
+			player.Team = Teams.PlayingTeam
+			task.wait(0.01)
+		end
+		self.MapClone.Spawns:Destroy()
+		self:Inround(ChoosenPlayer)
+	end
+
+--In round, basically, when a player die if the player is the killer the round end and the survivors win
+--if the player dying is the last player in the playing team the round end and the killer win
+--if neither of this happen and the round end with the decompte, the killer loses
+	function Round:Inround(Killer)
+
+		workspace:SetAttribute("GameStatus", "Playing")
+		IsDevour:FireClient(Killer, Killer:GetAttribute("Kills"))
+		Teams.PlayingTeam.PlayerRemoved:Connect(function(player)
+			if workspace:GetAttribute("GameStatus") == "Playing" then	
+				if #Teams.PlayingTeam:GetPlayers() == 0 then
+					self:OnKillerWin(Killer)
+				end
+			end
+		end)
+		
+		DiedEvent.OnServerEvent:Connect(function(player)
+			if player:GetAttribute("Killer") then self:OnSurvivorsWin() end
+			DeadEvent(player)
+		end)
+
+		for i = self.RoundDecompte, 0, -1 do
+			if workspace:GetAttribute("GameStatus") ~= "Playing" then return end
+			TimeEvent:FireAllClients(i)
+			task.wait(1)
+		end
+		self:OnSurvivorsWin()
+	end
+	
+	--When the players win
+	function Round:OnSurvivorsWin()
+		workspace:SetAttribute("GameStatus", "Lobby")
+		SurvivorsWin:FireAllClients()
+		for i, player :Player in pairs(Teams.PlayingTeam:GetPlayers()) do
+			player.Character:FindFirstChild("HumanoidRootPart").Position = 
+				self.SpawnLocation.Position + Vector3.new(0,3,0)
+			local playerChance = player:GetAttribute("Chance")
+			player:SetAttribute("Chance", playerChance + 5)
+			player.leaderstats.Wins.Value += 1
+			player.Team = Teams.LobbyTeam
+		end
+		self:EndKiller()
+	end
+
+	--When the killer win
+	function Round:OnKillerWin(Killer :Player)
+		workspace:SetAttribute("GameStatus", "Lobby")
+		KillerWin:FireAllClients(Killer)
+		Killer.leaderstats.KillerWins.Value += 1
+		self:EndKiller()
+	end
+
+	--End the killer and clearing out his capacities and looping true again the system again
+	function Round:EndKiller()
+		self.Killer:SetAttribute("Killer", nil)
+		self.Killer:SetAttribute("DevourKiller", nil)
+		self.Killer:SetAttribute("Kills", nil)
+		self.Glow:Destroy()
+		self.Killer:SetAttribute("Damage", nil)
+		self.MapClone:Destroy()
+		if self.Killer.Team ~= Teams.LobbyTeam then 
+			self.Killer.Character:FindFirstChild("HumanoidRootPart").Position =
+				self.SpawnLocation.Position + Vector3.new(0,3,0) 
+			self.Killer.Team = Teams.LobbyTeam
+		end
+		task.wait(2)
+		self:Intermission()
+	end
