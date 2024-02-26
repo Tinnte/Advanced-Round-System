@@ -1,1 +1,1 @@
-Hello, this is a pretty advanced system made by me, it include a map voting system, a devorer of souls system and other features
+Hello, this is a pretty advanced system made by me, it include a map voting system, a devorer of souls system and other features. If you want to understand it, there is comments all along to detail the script
